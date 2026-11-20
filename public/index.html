@@ -1,0 +1,765 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>NutraStack Post-Mortem</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="NutraStack was a supplement marketplace that ranked products by their labels, built from 2023 to 2026. What we built, what happened, and what I learned.">
+<meta property="og:title" content="NutraStack, 2023–2026">
+<meta property="og:description" content="A supplement marketplace that ranked products by the label instead of the vibes. What we built, what happened, and what I learned.">
+<meta property="og:type" content="website">
+<meta name="theme-color" content="#FFFDF6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0F0D08" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&family=Libre+Franklin:ital,wght@0,400;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a Nutrition Facts panel stretched into a page. A fixed margin column on the left carries
+   dates and section labels; heavy label rules divide the big moments. Gold highlighter is the one loud gesture. */
+:root {
+  --paper: #FFFDF6;
+  --card: #FFFFFF;
+  --ink: #17140C;
+  --ink-soft: #5E5642;
+  --rule: #E4DCC6;
+  --margin: #E9CF7E;
+  --hl: #FCD877;
+  --hl-ink: #17140C;
+  --accent: #7A5800;
+  --track: #F1EAD6;
+
+  --f-display: "Archivo", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --f-body: "Libre Franklin", "Franklin Gothic Book", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+
+  --step--1: 0.8125rem;
+  --step-0: 1.0625rem;
+  --step-1: 1.3rem;
+  --step-2: 1.65rem;
+  --step-3: clamp(2rem, 4vw, 2.6rem);
+  --step-4: clamp(3.2rem, 10vw, 6.6rem);
+
+  --margin-col: 9.5rem;
+  --content: 44rem;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0F0D08; --card: #19160E; --ink: #F5EDD8; --ink-soft: #ADA38A;
+    --rule: #2E2919; --margin: #5A4A1C; --hl: #E8C25A; --hl-ink: #0F0D08; --accent: #FCD877; --track: #29241A;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #0F0D08; --card: #19160E; --ink: #F5EDD8; --ink-soft: #ADA38A;
+  --rule: #2E2919; --margin: #5A4A1C; --hl: #E8C25A; --hl-ink: #0F0D08; --accent: #FCD877; --track: #29241A;
+  color-scheme: dark;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--f-body);
+  font-size: var(--step-0);
+  line-height: 1.6;
+}
+img { max-width: 100%; }
+[hidden] { display: none !important; }
+a { color: var(--accent); text-underline-offset: 0.18em; }
+a:focus-visible, button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+h1, h2, h3 { font-family: var(--f-display); font-weight: 800; font-stretch: 88%; line-height: 1.1; letter-spacing: -0.01em; text-wrap: balance; margin: 0; }
+p { margin: 0; }
+
+mark {
+  color: var(--hl-ink);
+  background-color: transparent;
+  background-image: linear-gradient(100deg, transparent 0.15em, var(--hl) 0.15em, var(--hl) calc(100% - 0.15em), transparent calc(100% - 0.15em));
+  background-repeat: no-repeat;
+  background-size: 100% 0.95em;
+  background-position: 0 70%;
+  padding: 0 0.12em;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+.page {
+  position: relative;
+  max-width: calc(var(--margin-col) + var(--content) + 14rem);
+  margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+
+/* Section = margin label + content */
+.sheet {
+  display: grid;
+  grid-template-columns: var(--margin-col) minmax(0, 1fr);
+  column-gap: 2.5rem;
+  padding-block: 4.5rem;
+  border-top: 1px solid var(--rule);
+  position: relative;
+}
+.sheet.heavy { border-top: 10px solid var(--ink); }
+.sheet::before {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0;
+  left: calc(var(--margin-col) + 1.25rem);
+  width: 2px;
+  background: var(--margin);
+}
+.label {
+  font-family: var(--f-mono);
+  font-size: var(--step--1);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  padding-top: 0.55rem;
+  text-align: right;
+}
+.body { min-width: 0; display: grid; gap: 1.5rem; max-width: var(--content); }
+.body.wide { max-width: none; }
+.body > h2 { font-size: var(--step-3); }
+.prose { display: grid; gap: 1rem; max-width: 38rem; }
+p.prose { display: block; }
+.muted { color: var(--ink-soft); }
+.note { font-size: var(--step--1); color: var(--ink-soft); font-family: var(--f-mono); line-height: 1.5; }
+
+/* Top bar */
+.top {
+  display: flex; justify-content: space-between; align-items: center; gap: 1rem;
+  padding-block: 1.25rem;
+  font-family: var(--f-mono); font-size: var(--step--1); color: var(--ink-soft);
+}
+.wordmark { display: inline-flex; align-items: center; gap: 0.55rem; font-family: var(--f-display); font-weight: 900; font-stretch: 100%; font-size: 1.3rem; color: var(--ink); text-decoration: none; letter-spacing: -0.01em; }
+.wordmark svg { width: 1.6rem; height: 1.6rem; flex: none; }
+.top nav { display: flex; gap: 1.25rem; flex-wrap: wrap; justify-content: flex-end; }
+.top nav a { color: var(--ink-soft); text-decoration: none; }
+.top nav a:hover { color: var(--ink); text-decoration: underline; }
+
+/* Hero */
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: 3rem;
+  align-items: center;
+  padding-block: 3.5rem 5rem;
+}
+.eyebrow { font-family: var(--f-mono); font-size: var(--step--1); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); }
+.hero h1 { font-size: var(--step-4); font-weight: 900; font-stretch: 75%; letter-spacing: -0.025em; line-height: 0.95; margin-block: 0.5rem 1.25rem; }
+.lede { font-size: var(--step-1); line-height: 1.5; max-width: 34rem; }
+.hero-links { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-top: 1.75rem; font-weight: 700; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .sweep { animation: sweep 1.1s cubic-bezier(.6,.05,.3,1) 0.5s both; }
+  @keyframes sweep { from { background-size: 0% 0.95em; } to { background-size: 100% 0.95em; } }
+}
+
+/* Ranking demo, drawn as a Nutrition Facts panel */
+.rank { display: grid; gap: 0.9rem; min-width: 0; }
+.rank-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; font-family: var(--f-mono); font-size: var(--step--1); color: var(--ink-soft); }
+.facts {
+  background: var(--card);
+  border: 2px solid var(--ink);
+  padding: 0.75rem 1rem 0.9rem;
+  box-shadow: 0 20px 40px -28px rgba(23, 20, 12, 0.45);
+}
+.facts-title { font-size: clamp(1.9rem, 4.6vw, 2.5rem); font-weight: 900; font-stretch: 70%; letter-spacing: -0.01em; line-height: 1; }
+.facts-sub { font-size: 0.9rem; padding-block: 0.25rem 0.45rem; border-bottom: 10px solid var(--ink); }
+.facts-sub b { font-weight: 700; }
+.crit-label { font-family: var(--f-display); font-weight: 800; font-size: 0.85rem; padding-top: 0.5rem; display: flex; justify-content: space-between; gap: 1rem; }
+.crit-label span { font-family: var(--f-body); font-weight: 400; color: var(--ink-soft); }
+.crit { display: flex; flex-wrap: wrap; gap: 0.4rem; padding-block: 0.5rem 0.7rem; border-bottom: 5px solid var(--ink); }
+.crit button {
+  font: inherit; font-size: 0.82rem; font-weight: 600;
+  padding: 0.3rem 0.65rem; border-radius: 999px; cursor: pointer;
+  border: 1.5px solid var(--ink); background: transparent; color: var(--ink);
+  display: inline-flex; gap: 0.35rem; align-items: baseline;
+}
+.crit button small { font-family: var(--f-mono); font-weight: 400; font-size: 0.7rem; color: var(--ink-soft); }
+.crit button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+.crit button[aria-pressed="true"] small { color: var(--hl); }
+.crit button:hover { border-color: var(--accent); }
+.rows { list-style: none; margin: 0; padding: 0; position: relative; }
+.rows li {
+  display: grid; grid-template-columns: 1.4rem minmax(0, 1fr) auto; column-gap: 0.6rem; row-gap: 0.15rem;
+  align-items: baseline; padding-block: 0.45rem; border-bottom: 1px solid var(--ink);
+  background: var(--card);
+}
+.rows li:last-child { border-bottom: 0; }
+.rows .pos { font-family: var(--f-display); font-weight: 900; font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+.rows .name { font-weight: 700; font-size: 0.95rem; line-height: 1.25; min-width: 0; }
+.rows .name .tag { font-family: var(--f-mono); font-weight: 500; font-size: 0.62rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--hl-ink); background: var(--hl); padding: 0.05rem 0.3rem; margin-left: 0.3rem; vertical-align: 0.12em; white-space: nowrap; }
+.rows .score { font-family: var(--f-mono); font-size: 0.8rem; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.rows .facts-line { grid-column: 2 / 4; font-family: var(--f-mono); font-size: 0.72rem; color: var(--ink-soft); font-variant-numeric: tabular-nums; display: flex; flex-wrap: wrap; gap: 0 0.8rem; }
+.rows .facts-line b { color: var(--ink); font-weight: 500; }
+.rows .meter { grid-column: 2 / 4; height: 5px; background: var(--track); }
+.rows .meter i { display: block; height: 100%; background: var(--ink); width: 0; }
+@media (prefers-reduced-motion: no-preference) {
+  .rows .meter i { transition: width 0.45s cubic-bezier(.4,.1,.2,1); }
+}
+.formula { font-family: var(--f-mono); font-size: var(--step--1); color: var(--ink-soft); min-height: 1.6em; }
+.formula strong { color: var(--ink); font-weight: 500; }
+
+/* Timeline */
+.timeline { list-style: none; margin: 0; padding: 0; display: grid; gap: 2.25rem; }
+.timeline li { display: grid; grid-template-columns: var(--margin-col) minmax(0, 1fr); column-gap: 2.5rem; }
+.timeline time {
+  font-family: var(--f-mono); font-size: var(--step--1); color: var(--ink-soft);
+  text-align: right; padding-top: 0.3rem; font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.timeline .entry { display: grid; gap: 0.4rem; max-width: var(--content); min-width: 0; position: relative; }
+.timeline .entry::before {
+  content: ""; position: absolute; left: -1.62rem; top: 0.5rem;
+  width: 0.65rem; height: 0.65rem;
+  background: var(--paper); border: 2px solid var(--ink);
+}
+.timeline li.end .entry::before { background: var(--ink); }
+.timeline h3 { font-size: var(--step-1); }
+.timeline-sheet { grid-template-columns: minmax(0, 1fr); }
+.timeline-sheet > .head { display: grid; grid-template-columns: var(--margin-col) minmax(0, 1fr); column-gap: 2.5rem; margin-bottom: 2.5rem; }
+
+/* Tools */
+.tools { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.tool {
+  background: var(--card); border: 1px solid var(--rule); border-top: 5px solid var(--ink);
+  padding: 1.2rem 1.4rem 1.4rem; display: grid; gap: 0.5rem; align-content: start;
+}
+.tool h3 { font-size: var(--step-2); }
+.tool .tag { font-family: var(--f-mono); font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-soft); }
+.planned { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: 0.25rem 1.5rem; padding: 0; margin: 0; list-style: none; }
+.planned li { padding-block: 0.7rem; border-top: 1px dashed var(--rule); display: grid; gap: 0.15rem; }
+.planned b { font-family: var(--f-display); font-weight: 800; font-stretch: 88%; font-size: var(--step-1); }
+.planned span { color: var(--ink-soft); font-size: 0.95rem; }
+.subhead { font-family: var(--f-mono); font-size: var(--step--1); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-soft); margin-top: 1rem; }
+
+/* Onboarding steps */
+.day { display: grid; gap: 0; border-top: 1px solid var(--ink); }
+.day div { display: grid; grid-template-columns: 6.5rem minmax(0, 1fr); gap: 1rem; padding-block: 0.8rem; border-bottom: 1px solid var(--rule); }
+.day dt, .day .k { font-family: var(--f-mono); font-size: var(--step--1); color: var(--ink-soft); padding-top: 0.2rem; }
+.partners { display: flex; flex-wrap: wrap; gap: 0.45rem; padding: 0; margin: 0; list-style: none; }
+.partners li { font-size: 0.9rem; font-weight: 600; padding: 0.2rem 0.6rem; border: 1px solid var(--rule); background: var(--card); }
+
+/* Landing page recreation */
+.ad {
+  border: 2px solid var(--ink); background: var(--card);
+  padding: 1.5rem; display: grid; gap: 1.1rem; max-width: 34rem;
+}
+.ad .tagline { font-family: var(--f-display); font-weight: 900; font-stretch: 75%; font-size: var(--step-3); line-height: 1; }
+.ad .cta { font-family: var(--f-mono); font-size: var(--step--1); }
+.ad .cta span { display: inline-block; background: var(--ink); color: var(--paper); padding: 0.35rem 0.8rem; }
+.vs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 5px solid var(--ink); }
+.vs div { padding: 0.7rem 0.6rem 0 0; display: grid; gap: 0.1rem; }
+.vs b { font-family: var(--f-display); font-weight: 900; font-stretch: 80%; font-size: 1.5rem; line-height: 1.05; font-variant-numeric: tabular-nums; }
+.vs span { font-family: var(--f-mono); font-size: 0.72rem; color: var(--ink-soft); }
+.ad .q { font-weight: 700; }
+
+/* Numbers */
+.numbers { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; border-top: 10px solid var(--ink); }
+.numbers + .numbers { border-top-width: 5px; }
+.numbers div { padding: 1.1rem 1rem 1.2rem 0; display: grid; gap: 0.35rem; align-content: start; }
+.numbers b { font-family: var(--f-display); font-weight: 900; font-stretch: 75%; font-size: var(--step-3); line-height: 1; font-variant-numeric: tabular-nums; }
+.numbers span { font-size: 0.95rem; color: var(--ink-soft); }
+.numbers-cap { font-family: var(--f-display); font-weight: 800; font-size: 0.95rem; display: flex; justify-content: space-between; gap: 1rem; padding-bottom: 0.3rem; }
+.numbers-cap span { font-family: var(--f-mono); font-weight: 400; font-size: var(--step--1); color: var(--ink-soft); }
+
+/* Schema */
+.schema { overflow-x: auto; border: 1px solid var(--rule); background: var(--card); }
+.schema table { border-collapse: collapse; font-family: var(--f-mono); font-size: 0.8rem; width: 100%; min-width: 34rem; }
+.schema th, .schema td { text-align: left; padding: 0.55rem 0.9rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+.schema th { font-weight: 500; color: var(--ink); white-space: nowrap; }
+.schema td { color: var(--ink-soft); }
+.schema tr:last-child th, .schema tr:last-child td { border-bottom: 0; }
+.built-list { display: grid; gap: 0.75rem; padding-left: 1.2rem; margin: 0; max-width: 38rem; }
+
+/* Lessons */
+.lessons { list-style: none; margin: 0; padding: 0; display: grid; gap: 2rem; counter-reset: lesson; }
+.lessons li { display: grid; gap: 0.5rem; counter-increment: lesson; max-width: 38rem; }
+.lessons h3 { font-size: var(--step-2); }
+.lessons h3::before { content: counter(lesson) ". "; color: var(--ink-soft); }
+
+/* Team */
+.team { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2rem; }
+.person { display: grid; gap: 0.35rem; align-content: start; }
+.person h3 { font-size: var(--step-2); }
+.person .role { font-family: var(--f-mono); font-size: var(--step--1); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-soft); }
+
+blockquote { margin: 0; display: grid; gap: 0.75rem; }
+blockquote p { font-family: var(--f-display); font-weight: 900; font-stretch: 75%; font-size: var(--step-4); line-height: 0.95; letter-spacing: -0.02em; text-wrap: balance; }
+blockquote cite { font-style: normal; font-family: var(--f-mono); font-size: var(--step--1); color: var(--ink-soft); }
+
+footer {
+  border-top: 10px solid var(--ink);
+  padding-block: 1.5rem 3rem;
+  display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap;
+  font-family: var(--f-mono); font-size: var(--step--1); color: var(--ink-soft);
+}
+
+@media (max-width: 900px) {
+  .hero { grid-template-columns: minmax(0, 1fr); gap: 2.5rem; }
+  .numbers { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  :root { --margin-col: 0; }
+  .sheet { grid-template-columns: minmax(0, 1fr); row-gap: 1rem; padding-block: 3rem; }
+  .sheet::before { display: none; }
+  .label { text-align: left; padding-top: 0; }
+  .timeline-sheet > .head { grid-template-columns: minmax(0, 1fr); row-gap: 1rem; }
+  .timeline li { grid-template-columns: minmax(0, 1fr); row-gap: 0.25rem; padding-left: 1.4rem; border-left: 2px solid var(--margin); }
+  .timeline time { text-align: left; padding-top: 0; }
+  .timeline .entry::before { left: calc(-1.4rem - 0.45rem); top: -1.3rem; }
+  .tools, .team { grid-template-columns: minmax(0, 1fr); }
+  .top nav { display: none; }
+}
+@media (max-width: 420px) {
+  .facts { padding-inline: 0.75rem; }
+  .crit button { font-size: 0.78rem; padding-inline: 0.55rem; }
+  .vs b { font-size: 1.25rem; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="top">
+    <a class="wordmark" href="#" aria-label="NutraStack">
+      <svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="12" fill="#0F0D08"/><path fill="#FCD877" d="M20 15h5.5L45 34.5V42L25 22v27h-5zM33 15h7.5l4.5 4.5v10.5zM33 35.5l12 12V49h-7.5L33 44.5z"/></svg>
+      NutraStack
+    </a>
+    <nav aria-label="Sections">
+      <a href="#timeline">Timeline</a>
+      <a href="#built">What we built</a>
+      <a href="#why">Why it stopped</a>
+      <a href="#lessons">Lessons</a>
+      <a href="#team">Team</a>
+    </nav>
+  </header>
+
+  <section class="hero" aria-labelledby="title">
+    <div>
+      <p class="eyebrow">Post-mortem · 2023 – 2026</p>
+      <h1 id="title">NutraStack</h1>
+      <p class="lede">A supplement marketplace that ranked products by what's on the label instead of the vibes in the ad. We catalogued 1,404 products and signed affiliate deals with 19 brands. Then <mark class="sweep">the work outgrew the returns</mark>. This page records what we built and what I learned.</p>
+      <div class="hero-links">
+        <a href="#built">See what we built</a>
+        <a href="#why">Why it stopped</a>
+      </div>
+    </div>
+
+    <div class="rank" aria-labelledby="rank-title">
+      <div class="rank-head">
+        <span id="rank-title">rank · rebuilt for this page</span>
+        <span>6 of 57 bars</span>
+      </div>
+      <div class="facts">
+        <h2 class="facts-title">Protein Bars</h2>
+        <p class="facts-sub">Ranked by <b id="crit-summary">cost per serving, protein</b></p>
+        <p class="crit-label">Criteria <span>tap to add or remove</span></p>
+        <div class="crit" role="group" aria-label="Ranking criteria">
+          <button type="button" id="c-cps" data-key="cps" aria-pressed="true">Cost / bar <small>low</small></button>
+          <button type="button" id="c-protein" data-key="protein" aria-pressed="true">Protein <small>high</small></button>
+          <button type="button" id="c-sugar" data-key="sugar" aria-pressed="false">Sugar <small>low</small></button>
+          <button type="button" id="c-fiber" data-key="fiber" aria-pressed="false">Fiber <small>high</small></button>
+          <button type="button" id="c-cal" data-key="cal" aria-pressed="false">Calories <small>low</small></button>
+        </div>
+        <ol class="rows" id="rows" aria-live="polite"></ol>
+      </div>
+      <p class="formula" id="formula">Scoring: <strong>grams of protein per dollar</strong></p>
+      <p class="note">This uses NutraStack's ranking formula and the label data from our database. Try adding Sugar. Prices are as we recorded them in 2024.</p>
+    </div>
+  </section>
+
+  <section class="sheet heavy timeline-sheet" id="timeline" aria-labelledby="timeline-h">
+    <div class="head">
+      <p class="label">Timeline</p>
+      <h2 id="timeline-h" style="font-size: var(--step-3)">From a side project to a marketplace</h2>
+    </div>
+    <ol class="timeline">
+      <li>
+        <time datetime="2023-10">Oct 2023</time>
+        <div class="entry">
+          <h3>The idea</h3>
+          <p class="muted">A friend pitched me a marketplace where supplement brands would compete on nutrition instead of vibes. It started as a side project.</p>
+        </div>
+      </li>
+      <li>
+        <time datetime="2024-03">Mar 2024</time>
+        <div class="entry">
+          <h3>NutraStack Inc. is incorporated</h3>
+          <p class="muted">From here until November, NutraStack was close to a full-time job.</p>
+        </div>
+      </li>
+      <li>
+        <time datetime="2024-04">Apr–Jun 2024</time>
+        <div class="entry">
+          <h3>Building the label database</h3>
+          <p class="muted">Sorting and filtering came first, then side-by-side compare, proprietary blends broken into their ingredients, and a landing page with a waitlist.</p>
+        </div>
+      </li>
+      <li>
+        <time datetime="2024-07">Jul–Aug 2024</time>
+        <div class="entry">
+          <h3>A buy button and the first partners</h3>
+          <p class="muted">Every product got a Buy link that routed to the brand or to Amazon. Category rankings, search and sign-up followed, along with partner discount codes and referral links.</p>
+        </div>
+      </li>
+      <li>
+        <time datetime="2024-09">Sep–Oct 2024</time>
+        <div class="entry">
+          <h3>The mega drop</h3>
+          <p class="muted">The largest catalog update we made, a new landing page with a partner carousel, and % Daily Value and category percentiles on every product page.</p>
+        </div>
+      </li>
+      <li class="end">
+        <time datetime="2025">2025</time>
+        <div class="entry">
+          <h3>One more round of pitches</h3>
+          <p class="muted">I made a new brand deck and pitched a few brands, but held off on going back to 10-hour days until something gave me a reason to expect a different result.</p>
+        </div>
+      </li>
+    </ol>
+  </section>
+
+  <section class="sheet" id="built" aria-labelledby="built-h">
+    <p class="label">What we built</p>
+    <div class="body wide">
+      <h2 id="built-h">Four ways to shop by the label</h2>
+      <p class="prose muted" style="max-width: 38rem">Every product was stored as its full Supplement or Nutrition Facts panel, one row per ingredient and dose. Everything else came from that data.</p>
+      <div class="tools">
+        <article class="tool">
+          <span class="tag">Shipped · Rank</span>
+          <h3>Discover</h3>
+          <p>66 categories, from high-stim pre-workouts to frozen desserts. Sort by up to 10 criteria at once, such as creatine per dollar, and filter out what you don't want, like added sugar or artificial flavors.</p>
+        </article>
+        <article class="tool">
+          <span class="tag">Shipped · Compare</span>
+          <h3>Compare</h3>
+          <p>Up to three products side by side, ingredient by ingredient, with blends expanded and flavors you could switch between.</p>
+        </article>
+        <article class="tool">
+          <span class="tag">Shipped · Inspect</span>
+          <h3>Product pages</h3>
+          <p>The full label for every flavor, % Daily Value, and a percentile showing how each dose compared with the rest of the category.</p>
+        </article>
+        <article class="tool">
+          <span class="tag">Shipped · Learn</span>
+          <h3>Ingredients</h3>
+          <p>1,880 tracked ingredients, each with an article explaining what it does and a ranking of the products that contain the most of it.</p>
+        </article>
+      </div>
+
+      <p class="subhead">Shelved</p>
+      <ul class="planned">
+        <li><b>Stacks</b><span>Build a named stack of products and share it with an affiliate link. Moved to beta in July 2024 and never launched.</span></li>
+        <li><b>Profiles</b><span>Usernames, follows, likes and views around shared stacks.</span></li>
+        <li><b>Creator links</b><span>Per-user affiliate links so creators could earn from the stacks they shared.</span></li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="sheet" aria-labelledby="brands-h">
+    <p class="label">For brands</p>
+    <div class="body">
+      <h2 id="brands-h">How a brand joined</h2>
+      <p class="prose muted">The other side of the marketplace. Our brand deck promised that products would rank on relevance, not ad budget, and that we only earned when a brand made a sale.</p>
+      <div class="day">
+        <div><span class="k">Listing</span><p>We added the brand's products for them: images, nutrition labels, descriptions and prices.</p></div>
+        <div><span class="k">Marketing</span><p>Featured brands appeared in our social posts and the landing page carousel.</p></div>
+        <div><span class="k">Commission</span><p>A flat 20% on referred sales, open to negotiation.</p></div>
+        <div><span class="k">Payouts</span><p>Monthly through PayPal, or Venmo, direct deposit or Shopify Collabs.</p></div>
+        <div><span class="k">Tracking</span><p>A referral URL with a 30 to 60 day cookie, plus a discount code such as NUTRASTACK10 where tracking wasn't possible.</p></div>
+      </div>
+      <p class="subhead">Partners</p>
+      <ul class="partners">
+        <li>Adonis Complex</li><li>Arch</li><li>Archaneon</li><li>Blackstone Labs</li>
+        <li>Byoform</li><li>Global Formulas</li><li>KEEP</li><li>Live Evolved</li>
+        <li>Lives Potions</li><li>Protein Puck</li><li>Psycho Pharma</li><li>Quick Pump Energy</li>
+        <li>Regenics</li><li>Shonen</li><li>So Sick</li><li>SuppDawg</li>
+        <li>Swollhouse</li><li>Toxic Masculinity Nutrition</li><li>Yumtein</li>
+      </ul>
+      <p class="note">19 brands signed affiliate agreements. Archaneon, Byoform, Live Evolved, Swollhouse, Toxic Masculinity Nutrition and Yumtein signed after the last site update and never went live. Products from every other brand linked to Amazon.</p>
+    </div>
+  </section>
+
+  <section class="sheet" aria-labelledby="ad-h">
+    <p class="label">Sep 2024</p>
+    <div class="body">
+      <h2 id="ad-h">The front door</h2>
+      <p class="prose muted">The landing page led with a direct comparison, because the numbers were the whole argument.</p>
+      <figure class="ad" style="margin: 0">
+        <p class="tagline">Elevate your fitness with confidence</p>
+        <p class="q">Looking for a healthy soda?</p>
+        <div class="vs" aria-label="Three sodas compared">
+          <div><b>25</b><span>calories · 5g sugar</span></div>
+          <div><b>0</b><span>calories · 0g sugar</span></div>
+          <div><b>35</b><span>calories · 3g sugar</span></div>
+        </div>
+        <p class="cta"><span>Compare Sodas</span></p>
+      </figure>
+    </div>
+  </section>
+
+  <section class="sheet heavy" id="numbers" aria-labelledby="numbers-h">
+    <p class="label">Traction</p>
+    <div class="body wide">
+      <h2 id="numbers-h">Big inputs, tiny outputs</h2>
+      <div>
+        <p class="numbers-cap">What went in <span>catalog and partners</span></p>
+        <div class="numbers">
+          <div><b>1,404</b><span>products</span></div>
+          <div><b>3,325</b><span>flavors with full labels</span></div>
+          <div><b>108</b><span>brands</span></div>
+          <div><b>19</b><span>brand partners</span></div>
+        </div>
+      </div>
+      <div>
+        <p class="numbers-cap">What came back <span>Nov 2026</span></p>
+        <div class="numbers">
+          <div><b>$5,689</b><span>spent on Instagram and TikTok ads</span></div>
+          <div><b>1,191</b><span>Instagram followers, @nutrastackapp</span></div>
+          <div><b>1,652</b><span>TikTok followers, @nutrastack</span></div>
+          <div><b>$2.00</b><span>in ad spend per follower</span></div>
+        </div>
+      </div>
+      <p class="note">Catalog counts are from the code as of November 2024. The partner count includes six brands signed after that. Ad spend is totaled from 161 Meta and 14 TikTok receipts, August 2024 to March 2025. Follower counts are current.</p>
+    </div>
+  </section>
+
+  <section class="sheet" aria-labelledby="under-h">
+    <p class="label">Under the hood</p>
+    <div class="body">
+      <h2 id="under-h">What we built underneath</h2>
+      <ul class="built-list">
+        <li>A <b>Flask</b> app on <b>Azure App Service</b>, deployed from GitHub Actions, backed by Azure SQL.</li>
+        <li><b>A hand-built label database.</b> Serving size, servings per container, every ingredient and dose, and the other-ingredients list for each flavor, with 176 proprietary blends mapped to their components.</li>
+        <li><b>Weighted ranking.</b> Each criterion was normalized, passed through a sigmoid fit to that category's spread, weighted 1 to 5 and summed. Cost per serving was always one of the criteria.</li>
+        <li><b>Affiliate routing.</b> The Buy button resolved to a partner's direct link, a referral parameter or an Amazon Associates link, and logged every click.</li>
+        <li>First-party analytics for sessions, page views, searches, comparisons and outbound clicks, plus server errors posted to Discord.</li>
+      </ul>
+      <div class="schema" role="region" aria-label="Excerpt from the NutraStack data model" tabindex="0">
+        <table>
+          <tbody>
+            <tr><th>products</th><td>product_id · brand · name · product_type · description · price · flavors</td></tr>
+            <tr><th>product_flavors</th><td>parent_product_id · child_product_id · flavor</td></tr>
+            <tr><th>flavor_ingredients</th><td>product_id · ingredient · value</td></tr>
+            <tr><th>product_servings</th><td>product_id · servings · serving_size</td></tr>
+            <tr><th>compare_events</th><td>compare_id · time · session_id · product1 · product2 · product3</td></tr>
+            <tr><th>outbound_clicks</th><td>click_id · time · session_id · page_url · product_id · destination</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note">Excerpt from our 2024 schema.</p>
+    </div>
+  </section>
+
+  <section class="sheet" id="why" aria-labelledby="why-h">
+    <p class="label">Why it stopped</p>
+    <div class="body">
+      <h2 id="why-h">The work outgrew the returns</h2>
+      <div class="prose">
+        <p>NutraStack ran on data. Every flavor of every product was a full label, entered and checked by hand, and every new brand, flavor or reformulation meant more of it. Through most of 2024 that was more than ten hours a day.</p>
+        <p>The returns didn't follow. $5,689 of Instagram and TikTok ads grew the accounts to 1,191 and 1,652 followers, but followers didn't become shoppers. Sales through the site were minimal, and a 20% commission on minimal sales never came close to paying for the work.</p>
+        <p>In 2025 I pitched a few more brands, but I wasn't willing to go back to 10-hour days without a clear sign that the result would be different.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="sheet" id="lessons" aria-labelledby="lessons-h">
+    <p class="label">Lessons</p>
+    <div class="body">
+      <h2 id="lessons-h">What I'd tell myself in 2023</h2>
+      <ol class="lessons">
+        <li>
+          <h3>Followers aren't shoppers</h3>
+          <p class="muted">We were already logging every outbound click. We should have spent $500 per channel, measured clicks and purchases, and stopped as soon as one didn't convert. Instead we bought reach and counted followers.</p>
+        </li>
+        <li>
+          <h3>Brands were the easy side</h3>
+          <p class="muted">Brands said yes far more easily than shoppers did. Getting shoppers was the actual business, and affiliate revenue needs volume before it's worth anything. I'd pick one niche, like pre-workouts, and win search traffic for it before adding a 66th category.</p>
+        </li>
+        <li>
+          <h3>Price the upkeep before you grow the catalog</h3>
+          <p class="muted">A label database is never finished. Brands reformulate, add flavors and change prices, and each of 108 brands added to the work. I should have automated label capture early, or kept the catalog to the categories that actually sold.</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="sheet" id="team" aria-labelledby="team-h">
+    <p class="label">Team</p>
+    <div class="body wide">
+      <h2 id="team-h">Who built it</h2>
+      <div class="team">
+        <div class="person">
+          <span class="role">Founder · CEO</span>
+          <h3>Zach Rubin</h3>
+          <p class="muted">Designed and built the website, the ranking engine and the product data model. Mathematics-Computer Science, Statistics and Political Science.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sheet heavy" aria-label="Closing">
+    <p class="label">In our words</p>
+    <div class="body">
+      <blockquote>
+        <p>“Rank on relevance, not budget.”</p>
+        <cite>from our 2025 brand deck</cite>
+      </blockquote>
+      <p class="prose muted">Thanks to every brand that trusted us with its products, and to everyone who used the site to compare a label.</p>
+    </div>
+  </section>
+
+  <footer>
+    <span>© 2024–2026 NutraStack Inc.</span>
+    <span>This page is an archive. The marketplace is no longer available.</span>
+  </footer>
+</div>
+
+<script>
+(function () {
+  // Label data and prices from our products database (2024). cps = price / servings per container.
+  var bars = [
+    { name: "KEEP Protein Bar", partner: true,  price: 38.49, n: 12, cal: 260, protein: 20, sugar: 8,  fiber: 13 },
+    { name: "Primal Power Protein & Energy Bar", partner: false, price: 45.00, n: 20, cal: 210, protein: 10, sugar: 13, fiber: 7 },
+    { name: "Protein Puck Single Serve", partner: true, price: 34.99, n: 16, cal: 320, protein: 9, sugar: 13, fiber: 5 },
+    { name: "Quest Protein Bar", partner: false, price: 33.48, n: 12, cal: 180, protein: 20, sugar: 1, fiber: 11 },
+    { name: "Barebells Protein Bar", partner: false, price: 28.99, n: 12, cal: 210, protein: 20, sugar: 1, fiber: 2 },
+    { name: "CLIF Builders", partner: false, price: 25.44, n: 12, cal: 290, protein: 20, sugar: 18, fiber: 2 }
+  ];
+  bars.forEach(function (b, i) { b.id = i; b.cps = b.price / b.n; });
+
+  // direction: true = lower is better, as in our rankings strings (e.g. "CPS~Low~5")
+  var criteria = {
+    cps:     { label: "cost per serving", low: true },
+    protein: { label: "protein", low: false },
+    sugar:   { label: "sugar", low: true },
+    fiber:   { label: "fiber", low: false },
+    cal:     { label: "calories", low: true }
+  };
+  var order = ["cps", "protein", "sugar", "fiber", "cal"];
+  var active = { cps: true, protein: true, sugar: false, fiber: false, cal: false };
+  var PRIORITY = 5;
+
+  function quantile(sorted, q) {
+    var pos = (sorted.length - 1) * q, lo = Math.floor(pos), hi = Math.ceil(pos);
+    return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
+  }
+  // Port of custom_sigmoid() from private/db.py
+  function sigmoid(values, lowIsGood) {
+    var zero = null, pool = values;
+    if (!lowIsGood && values.some(function (v) { return v === 0; })) {
+      zero = values.map(function (v) { return v === 0; });
+      pool = values.filter(function (v) { return v !== 0; });
+      if (!pool.length) return values.slice();
+    }
+    var min = Math.min.apply(null, pool), max = Math.max.apply(null, pool);
+    if (max === min) return values.map(function () { return 0.5; });
+    var norm = values.map(function (v, i) { return zero && zero[i] ? 0 : (v - min) / (max - min); });
+    var qs = norm.filter(function (_, i) { return !(zero && zero[i]); }).sort(function (a, b) { return a - b; });
+    var q1 = quantile(qs, 0.25), q2 = quantile(qs, 0.5), q3 = quantile(qs, 0.75);
+    var iqr = Math.max(q3 - q1, 0.01), k = 1 / (2 * iqr);
+    var out = norm.map(function (n) { return 1 / (1 + Math.exp(k * ((n - q2) / iqr) * (lowIsGood ? 1 : -1))); });
+    if (zero) out = out.map(function (v, i) { return zero[i] ? 0 : v; });
+    var lo = Math.min.apply(null, out), hi = Math.max.apply(null, out);
+    return out.map(function (v) { return hi === lo ? 0.5 : (v - lo) / (hi - lo); });
+  }
+
+  function score() {
+    var keys = order.filter(function (k) { return active[k]; });
+    var others = keys.filter(function (k) { return k !== "cps"; });
+    // Two criteria at priority 5, cost low + one "high" metric: the site used metric / cost per serving.
+    if (keys.length === 2 && active.cps && !criteria[others[0]].low) {
+      var m = others[0];
+      return { simple: m, list: bars.map(function (b) { return { b: b, r: b[m] / b.cps }; }) };
+    }
+    var cols = {};
+    keys.forEach(function (k) { cols[k] = sigmoid(bars.map(function (b) { return b[k]; }), criteria[k].low); });
+    return { simple: null, keys: keys, list: bars.map(function (b, i) {
+      var r = 0; keys.forEach(function (k) { r += cols[k][i] * PRIORITY; }); return { b: b, r: r };
+    }) };
+  }
+
+  var rowsEl = document.getElementById("rows");
+  var els = {};
+  bars.forEach(function (b) {
+    var li = document.createElement("li");
+    li.innerHTML = '<span class="pos"></span><span class="name"></span><span class="score"></span><span class="facts-line"></span><span class="meter"><i></i></span>';
+    li.querySelector(".name").textContent = b.name;
+    if (b.partner) {
+      var t = document.createElement("span"); t.className = "tag"; t.textContent = "partner";
+      li.querySelector(".name").appendChild(t);
+    }
+    els[b.id] = li; rowsEl.appendChild(li);
+  });
+
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  function render(animate) {
+    var res = score();
+    res.list.sort(function (a, b) { return b.r - a.r; });
+    var top = res.list[0].r || 1;
+    var before = {};
+    if (animate && !reduce) bars.forEach(function (b) { before[b.id] = els[b.id].getBoundingClientRect().top; });
+
+    res.list.forEach(function (item, i) {
+      var b = item.b, li = els[b.id];
+      li.querySelector(".pos").textContent = i + 1;
+      li.querySelector(".score").textContent = res.simple
+        ? item.r.toFixed(1) + " g/$"
+        : item.r.toFixed(1) + " / " + (res.keys.length * PRIORITY);
+      var f = [
+        ["cps", "$" + b.cps.toFixed(2) + "/bar"],
+        ["protein", b.protein + "g protein"],
+        ["sugar", b.sugar + "g sugar"],
+        ["fiber", b.fiber + "g fiber"],
+        ["cal", b.cal + " cal"]
+      ];
+      li.querySelector(".facts-line").innerHTML = f.map(function (p) {
+        return active[p[0]] ? "<b>" + p[1] + "</b>" : "<span>" + p[1] + "</span>";
+      }).join("");
+      li.querySelector(".meter i").style.width = Math.max(2, (item.r / top) * 100) + "%";
+      rowsEl.appendChild(li);
+    });
+
+    if (animate && !reduce) {
+      bars.forEach(function (b) {
+        var li = els[b.id], dy = before[b.id] - li.getBoundingClientRect().top;
+        if (!dy) return;
+        li.style.transition = "none";
+        li.style.transform = "translateY(" + dy + "px)";
+        li.getBoundingClientRect();
+        li.style.transition = "transform 0.45s cubic-bezier(.4,.1,.2,1)";
+        li.style.transform = "";
+      });
+    }
+
+    var names = order.filter(function (k) { return active[k]; }).map(function (k) { return criteria[k].label; });
+    document.getElementById("crit-summary").textContent = names.join(", ");
+    var formula = document.getElementById("formula");
+    formula.innerHTML = res.simple
+      ? "Scoring: <strong>grams of " + criteria[res.simple].label + " per dollar</strong>"
+      : "Scoring: <strong>" + res.keys.length + " sigmoid curves × weight 5, summed</strong>";
+  }
+
+  Array.prototype.forEach.call(document.querySelectorAll(".crit button"), function (btn) {
+    btn.addEventListener("click", function () {
+      var k = btn.getAttribute("data-key");
+      var count = order.filter(function (x) { return active[x]; }).length;
+      if (active[k] && count === 1) return; // keep at least one criterion
+      active[k] = !active[k];
+      btn.setAttribute("aria-pressed", active[k] ? "true" : "false");
+      render(true);
+    });
+  });
+
+  render(false);
+})();
+</script>
+</body>
+</html>
